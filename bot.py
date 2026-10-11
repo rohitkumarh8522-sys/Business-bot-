@@ -8,8 +8,10 @@ from telegram.ext import (
 # ----------------- CONFIGURATIONS -----------------
 TOKEN = os.getenv("BOT_TOKEN")  # Render Environment Variable
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))  # आपकी Telegram ID
+PORT = int(os.environ.get("PORT", 10000))  # Render का ऑटोमैटिक पोर्ट
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Render Web Service का URL (जैसे https://your-app.onrender.com)
 
-# Dynamic Data Storage (In-Memory)
+# Dynamic Data Storage
 DATA = {
     "qr_code": "https://via.placeholder.com/300?text=Scan+and+Pay", # Default QR
     "items": {
@@ -19,7 +21,7 @@ DATA = {
 }
 
 # States for ConversationHandler
-WAITING_BTN_NAME, WAITING_BTN_LINK, WAITING_NEW_QR = range(3)
+WAITING_BTN_NAME, WAITING_BTN_LINK = range(2)
 
 # ----------------- CUSTOMER FLOW -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -28,7 +30,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
     items = list(DATA["items"].items())
     
-    # Customer Buttons Layout (2 in a row)
     for i in range(0, len(items), 2):
         row = [InlineKeyboardButton(items[i][1]["name"], callback_data=f"select_{items[i][0]}")]
         if i + 1 < len(items):
@@ -67,7 +68,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
-    # --- CUSTOMER ACTIONS ---
     if data.startswith("select_"):
         item_key = data.split("_")[1]
         context.user_data["selected_item"] = item_key
@@ -87,7 +87,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "customer_back":
         await start(update, context)
 
-    # --- ADMIN ACTIONS (APPROVE / REJECT) ---
     elif data.startswith("approve_"):
         parts = data.split("_")
         user_id = int(parts[1])
@@ -109,7 +108,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.edit_message_caption(caption=query.message.caption + "\n\n❌ **REJECTED**")
 
-    # --- ADMIN PANEL BUTTONS ---
     elif data == "admin_view_btns":
         msg = "📋 **Current Buttons & Links:**\n\n"
         for k, v in DATA["items"].items():
@@ -137,7 +135,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
-    # 1. Admin Changing QR Code
     if context.user_data.get("waiting_for_qr") and user_id == ADMIN_ID:
         context.user_data["waiting_for_qr"] = False
         DATA["qr_code"] = update.message.photo[-1].file_id
@@ -145,7 +142,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_panel(update, context)
         return
 
-    # 2. Customer Sending Payment Screenshot
     if context.user_data.get("waiting_for_proof"):
         item_key = context.user_data.get("selected_item")
         user = update.effective_user
@@ -216,8 +212,15 @@ def main():
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    print("Bot starting...")
-    app.run_polling()
+    print(f"Starting webhook on port {PORT}...")
+    
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TOKEN,
+        webhook_url=f"{WEBHOOK_URL}/{TOKEN}",
+        bootstrap_retries=3
+    )
 
 if __name__ == "__main__":
     main()
